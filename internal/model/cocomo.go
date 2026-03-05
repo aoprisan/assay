@@ -8,12 +8,19 @@ import (
 
 // CostEstimate holds the COCOMO-based cost estimation.
 type CostEstimate struct {
-	EffortMonths  float64
-	BaseCost      float64
-	AdjustedLow   float64
-	AdjustedHigh  float64
-	Multiplier    float64
-	Multipliers   []MultiplierDetail
+	EffortMonths    float64
+	ScheduleMonths  float64 // estimated calendar time
+	TeamSize        float64 // average full-time equivalent developers
+	BaseCost        float64
+	AdjustedCost    float64
+	AdjustedLow     float64
+	AdjustedHigh    float64
+	CostPerSLOC     float64
+	Multiplier      float64
+	Multipliers     []MultiplierDetail
+	HourlyRate      float64
+	ConfidencePct   float64 // confidence band percentage (e.g. 0.25 = ±25%)
+	ConfidenceLevel string  // "high", "medium", "low"
 }
 
 type MultiplierDetail struct {
@@ -24,57 +31,216 @@ type MultiplierDetail struct {
 
 // Scores holds dimension scores and the composite.
 type Scores struct {
-	SizeEffort    int
-	CodeQuality   int
-	TestCoverage  int
-	DepHealth     int
-	GitActivity   int
-	Composite     int
+	SizeEffort   int
+	CodeQuality  int
+	TestCoverage int
+	DepHealth    int
+	GitActivity  int
+	Composite    int
 }
 
-// EstimateCost computes COCOMO II Basic cost with multipliers.
+// Language effort multipliers relative to a baseline (Go = 1.0).
+// Higher values mean more effort per SLOC for that language.
+var languageEffort = map[string]float64{
+	"Go":         1.0,
+	"Python":     0.9,
+	"Ruby":       0.9,
+	"JavaScript": 0.95,
+	"TypeScript": 1.0,
+	"Java":       1.1,
+	"C#":         1.1,
+	"C":          1.3,
+	"C++":        1.35,
+	"Rust":       1.2,
+	"Swift":      1.05,
+	"Kotlin":     1.0,
+	"Scala":      1.1,
+	"PHP":        0.85,
+	"Shell":      0.7,
+}
+
+// EstimateCost computes COCOMO II Basic cost with quality multipliers,
+// language-weighted effort, schedule estimation, and dynamic confidence bands.
 func EstimateCost(m *analyzer.Metrics, hourlyRate float64) CostEstimate {
 	ksloc := float64(m.TotalSLOC) / 1000.0
 	if ksloc < 0.01 {
 		ksloc = 0.01
 	}
 
+	// COCOMO II Basic: effort = a * (KSLOC)^b
 	effortMonths := 2.94 * math.Pow(ksloc, 1.10)
-	monthlyCost := hourlyRate * 160
+
+	// Apply language weighting: adjust effort based on language mix
+	langMultiplier := computeLanguageMultiplier(m)
+	effortMonths *= langMultiplier
+
+	monthlyCost := hourlyRate * 160 // 160 working hours per month
 	baseCost := effortMonths * monthlyCost
 
+	// --- Quality & risk multipliers ---
 	multiplier := 1.0
 	var details []MultiplierDetail
 
-	if m.TestRatio < 0.1 {
-		multiplier *= 1.3
-		details = append(details, MultiplierDetail{"Low Test Coverage", 1.3, "test_ratio < 10%"})
+	// Test coverage: graduated thresholds
+	if m.TestRatio < 0.05 {
+		multiplier *= 1.4
+		details = append(details, MultiplierDetail{"Very Low Test Coverage", 1.4, "test ratio < 5%"})
+	} else if m.TestRatio < 0.1 {
+		multiplier *= 1.2
+		details = append(details, MultiplierDetail{"Low Test Coverage", 1.2, "test ratio < 10%"})
+	} else if m.TestRatio >= 0.4 {
+		multiplier *= 0.9
+		details = append(details, MultiplierDetail{"Strong Test Coverage", 0.9, "test ratio >= 40%"})
 	}
 
-	if m.DuplicationPct > 15 {
+	// Code duplication: graduated
+	if m.DuplicationPct > 30 {
+		multiplier *= 1.35
+		details = append(details, MultiplierDetail{"Very High Duplication", 1.35, "duplication > 30%"})
+	} else if m.DuplicationPct > 15 {
 		multiplier *= 1.2
 		details = append(details, MultiplierDetail{"High Duplication", 1.2, "duplication > 15%"})
 	}
 
+	// Complexity: high average complexity per file increases cost
+	avgComplexity := 0.0
+	if m.FileCount > 0 {
+		avgComplexity = float64(m.TotalComplexity) / float64(m.FileCount)
+	}
+	if avgComplexity > 30 {
+		multiplier *= 1.3
+		details = append(details, MultiplierDetail{"Very High Complexity", 1.3, "avg complexity > 30 per file"})
+	} else if avgComplexity > 15 {
+		multiplier *= 1.15
+		details = append(details, MultiplierDetail{"High Complexity", 1.15, "avg complexity > 15 per file"})
+	}
+
+	// Dependency management
 	if len(m.DepFiles) > 0 && !m.HasLockfile {
 		multiplier *= 1.1
 		details = append(details, MultiplierDetail{"Missing Lockfile", 1.1, "no lockfile found"})
 	}
 
+	// Heavy dependency count
+	if m.Dependencies > 100 {
+		multiplier *= 1.15
+		details = append(details, MultiplierDetail{"Heavy Dependencies", 1.15, "over 100 dependencies"})
+	} else if m.Dependencies > 50 {
+		multiplier *= 1.05
+		details = append(details, MultiplierDetail{"Moderate Dependencies", 1.05, "over 50 dependencies"})
+	}
+
+	// Repository staleness
 	if m.GitAvailable && m.LastCommitDays > 365 {
 		multiplier *= 0.8
 		details = append(details, MultiplierDetail{"Stale Repository", 0.8, "last commit > 365 days"})
 	}
 
+	// Multi-contributor maturity bonus
+	if m.GitAvailable && m.ContributorCount >= 5 && m.CommitCount > 200 {
+		multiplier *= 0.95
+		details = append(details, MultiplierDetail{"Mature Project", 0.95, "5+ contributors, 200+ commits"})
+	}
+
 	adjusted := baseCost * multiplier
 
+	// Dynamic confidence band based on data quality
+	confidencePct, confidenceLevel := computeConfidence(m)
+	adjustedLow := adjusted * (1.0 - confidencePct)
+	adjustedHigh := adjusted * (1.0 + confidencePct)
+
+	// Schedule estimate using COCOMO II: T = 3.67 * (E)^0.28
+	adjustedEffort := effortMonths * multiplier
+	scheduleMonths := 3.67 * math.Pow(adjustedEffort, 0.28)
+
+	// Team size = effort / schedule
+	teamSize := 0.0
+	if scheduleMonths > 0 {
+		teamSize = adjustedEffort / scheduleMonths
+	}
+
+	// Cost per SLOC
+	costPerSLOC := 0.0
+	if m.TotalSLOC > 0 {
+		costPerSLOC = adjusted / float64(m.TotalSLOC)
+	}
+
 	return CostEstimate{
-		EffortMonths: effortMonths,
-		BaseCost:     baseCost,
-		AdjustedLow:  adjusted * 0.8,
-		AdjustedHigh: adjusted * 1.2,
-		Multiplier:   multiplier,
-		Multipliers:  details,
+		EffortMonths:    adjustedEffort,
+		ScheduleMonths:  scheduleMonths,
+		TeamSize:        teamSize,
+		BaseCost:        baseCost,
+		AdjustedCost:    adjusted,
+		AdjustedLow:     adjustedLow,
+		AdjustedHigh:    adjustedHigh,
+		CostPerSLOC:     costPerSLOC,
+		Multiplier:      multiplier,
+		Multipliers:     details,
+		HourlyRate:      hourlyRate,
+		ConfidencePct:   confidencePct,
+		ConfidenceLevel: confidenceLevel,
+	}
+}
+
+// computeLanguageMultiplier calculates a weighted effort multiplier based on the
+// language distribution in the codebase.
+func computeLanguageMultiplier(m *analyzer.Metrics) float64 {
+	if m.TotalSLOC == 0 || len(m.SLOCByLang) == 0 {
+		return 1.0
+	}
+
+	weighted := 0.0
+	for lang, sloc := range m.SLOCByLang {
+		factor, ok := languageEffort[lang]
+		if !ok {
+			factor = 1.0
+		}
+		weighted += factor * float64(sloc)
+	}
+	return weighted / float64(m.TotalSLOC)
+}
+
+// computeConfidence determines the confidence band and level based on how much
+// data we have. More signals = tighter band = higher confidence.
+func computeConfidence(m *analyzer.Metrics) (float64, string) {
+	// Start with wide band and narrow it as we get more signals
+	signals := 0
+	totalSignals := 5
+
+	// Have meaningful SLOC count?
+	if m.TotalSLOC > 100 {
+		signals++
+	}
+
+	// Have git data?
+	if m.GitAvailable {
+		signals++
+	}
+
+	// Have dependency info?
+	if len(m.DepFiles) > 0 {
+		signals++
+	}
+
+	// Have test info?
+	if m.TestFiles > 0 || m.SourceFiles > 0 {
+		signals++
+	}
+
+	// Have duplication analysis?
+	if m.FileCount > 5 {
+		signals++
+	}
+
+	ratio := float64(signals) / float64(totalSignals)
+
+	switch {
+	case ratio >= 0.8:
+		return 0.20, "high"
+	case ratio >= 0.5:
+		return 0.35, "medium"
+	default:
+		return 0.50, "low"
 	}
 }
 

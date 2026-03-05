@@ -36,21 +36,28 @@ type jsonMetrics struct {
 }
 
 type jsonScores struct {
-	SizeEffort  int `json:"size_effort"`
-	CodeQuality int `json:"code_quality"`
+	SizeEffort   int `json:"size_effort"`
+	CodeQuality  int `json:"code_quality"`
 	TestCoverage int `json:"test_coverage"`
-	DepHealth   int `json:"dep_health"`
-	GitActivity int `json:"git_activity"`
-	Composite   int `json:"composite"`
+	DepHealth    int `json:"dep_health"`
+	GitActivity  int `json:"git_activity"`
+	Composite    int `json:"composite"`
 }
 
 type jsonCost struct {
-	EffortMonths float64                `json:"effort_months"`
-	BaseCost     float64                `json:"base_cost"`
-	CostLow      float64                `json:"cost_low"`
-	CostHigh     float64                `json:"cost_high"`
-	Multiplier   float64                `json:"multiplier"`
-	Multipliers  []model.MultiplierDetail `json:"multipliers,omitempty"`
+	HourlyRate      float64                  `json:"hourly_rate"`
+	EffortMonths    float64                  `json:"effort_months"`
+	ScheduleMonths  float64                  `json:"schedule_months"`
+	TeamSize        float64                  `json:"team_size"`
+	BaseCost        float64                  `json:"base_cost"`
+	AdjustedCost    float64                  `json:"adjusted_cost"`
+	CostLow         float64                  `json:"cost_low"`
+	CostHigh        float64                  `json:"cost_high"`
+	CostPerSLOC     float64                  `json:"cost_per_sloc"`
+	Multiplier      float64                  `json:"multiplier"`
+	Multipliers     []model.MultiplierDetail `json:"multipliers,omitempty"`
+	ConfidencePct   float64                  `json:"confidence_pct"`
+	ConfidenceLevel string                   `json:"confidence_level"`
 }
 
 // RenderJSON writes JSON output.
@@ -89,12 +96,19 @@ func RenderJSON(w io.Writer, path string, m *analyzer.Metrics, cost model.CostEs
 			Composite:    scores.Composite,
 		},
 		Cost: jsonCost{
-			EffortMonths: cost.EffortMonths,
-			BaseCost:     cost.BaseCost,
-			CostLow:      cost.AdjustedLow,
-			CostHigh:     cost.AdjustedHigh,
-			Multiplier:   cost.Multiplier,
-			Multipliers:  cost.Multipliers,
+			HourlyRate:      cost.HourlyRate,
+			EffortMonths:    cost.EffortMonths,
+			ScheduleMonths:  cost.ScheduleMonths,
+			TeamSize:        cost.TeamSize,
+			BaseCost:        cost.BaseCost,
+			AdjustedCost:    cost.AdjustedCost,
+			CostLow:         cost.AdjustedLow,
+			CostHigh:        cost.AdjustedHigh,
+			CostPerSLOC:     cost.CostPerSLOC,
+			Multiplier:      cost.Multiplier,
+			Multipliers:     cost.Multipliers,
+			ConfidencePct:   cost.ConfidencePct,
+			ConfidenceLevel: cost.ConfidenceLevel,
 		},
 	}
 

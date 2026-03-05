@@ -22,6 +22,7 @@ func RenderTable(w io.Writer, path string, m *analyzer.Metrics, cost model.CostE
 	// SLOC with language breakdown
 	langBreak := langBreakdown(m)
 	fmt.Fprintf(w, "  %-20s %s  (%s)\n", "SLOC", formatNum(m.TotalSLOC), langBreak)
+	fmt.Fprintf(w, "  %-20s %d\n", "Files", m.FileCount)
 
 	// Complexity
 	avgComplexity := 0.0
@@ -31,7 +32,7 @@ func RenderTable(w io.Writer, path string, m *analyzer.Metrics, cost model.CostE
 	fmt.Fprintf(w, "  %-20s avg %.1f / file\n", "Complexity", avgComplexity)
 
 	// Test Ratio
-	fmt.Fprintf(w, "  %-20s %d%%\n", "Test Ratio", int(m.TestRatio*100))
+	fmt.Fprintf(w, "  %-20s %d%%  (%d test, %d source)\n", "Test Ratio", int(m.TestRatio*100), m.TestFiles, m.SourceFiles)
 
 	// Duplication
 	fmt.Fprintf(w, "  %-20s %.1f%%\n", "Duplication", m.DuplicationPct)
@@ -50,7 +51,7 @@ func RenderTable(w io.Writer, path string, m *analyzer.Metrics, cost model.CostE
 
 	// Git metrics
 	if m.GitAvailable {
-		fmt.Fprintf(w, "  %-20s %d\n", "Contributors", m.ContributorCount)
+		fmt.Fprintf(w, "  %-20s %d commits, %d contributors\n", "Git Activity", m.CommitCount, m.ContributorCount)
 		fmt.Fprintf(w, "  %-20s %s\n", "Repo Age", formatDays(m.RepoAgeDays))
 		fmt.Fprintf(w, "  %-20s %s\n", "Last Commit", formatDaysAgo(m.LastCommitDays))
 	}
@@ -70,12 +71,39 @@ func RenderTable(w io.Writer, path string, m *analyzer.Metrics, cost model.CostE
 
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  %-22s %d / 100\n", "Composite Score", scores.Composite)
-	fmt.Fprintf(w, "  %-22s $%s \u2013 $%s\n", "Estimated Cost", formatMoney(cost.AdjustedLow), formatMoney(cost.AdjustedHigh))
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, line)
+	fmt.Fprintln(w, "  Cost Estimate")
+	fmt.Fprintln(w, line)
+	fmt.Fprintf(w, "  %-22s $%s/hr\n", "Hourly Rate", formatMoney(cost.HourlyRate))
+	fmt.Fprintf(w, "  %-22s $%s\n", "Base Cost", formatMoney(cost.BaseCost))
+	if cost.Multiplier != 1.0 {
+		fmt.Fprintf(w, "  %-22s x%.2f\n", "Adjustment Factor", cost.Multiplier)
+		fmt.Fprintf(w, "  %-22s $%s\n", "Adjusted Cost", formatMoney(cost.AdjustedCost))
+	}
+	fmt.Fprintf(w, "  %-22s $%s \u2013 $%s  (\u00b1%.0f%%, %s confidence)\n",
+		"Estimated Range",
+		formatMoney(cost.AdjustedLow),
+		formatMoney(cost.AdjustedHigh),
+		cost.ConfidencePct*100,
+		cost.ConfidenceLevel,
+	)
+	fmt.Fprintf(w, "  %-22s $%.0f\n", "Cost / SLOC", cost.CostPerSLOC)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %-22s %.1f person-months\n", "Effort", cost.EffortMonths)
+	fmt.Fprintf(w, "  %-22s %.1f months\n", "Schedule", cost.ScheduleMonths)
+	fmt.Fprintf(w, "  %-22s %.1f developers\n", "Team Size (avg)", cost.TeamSize)
 
 	if len(cost.Multipliers) > 0 {
 		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  Adjustment Details:")
 		for _, mult := range cost.Multipliers {
-			fmt.Fprintf(w, "  \u26a0 %s (x%.1f): %s\n", mult.Name, mult.Factor, mult.Reason)
+			icon := "\u26a0"
+			if mult.Factor < 1.0 {
+				icon = "\u2713"
+			}
+			fmt.Fprintf(w, "    %s %-28s x%.2f  %s\n", icon, mult.Name, mult.Factor, mult.Reason)
 		}
 	}
 

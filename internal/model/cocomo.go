@@ -67,8 +67,12 @@ func EstimateCost(m *analyzer.Metrics, hourlyRate float64) CostEstimate {
 		ksloc = 0.01
 	}
 
-	// COCOMO II Basic: effort = a * (KSLOC)^b
-	effortMonths := 2.94 * math.Pow(ksloc, 1.10)
+	// COCOMO II adjusted for code-reproduction cost estimation.
+	// Standard COCOMO II uses a=2.94, b=1.10 but that models the full SDLC
+	// (requirements, design, testing, documentation, management overhead).
+	// For estimating the cost to reproduce existing code, we use the organic
+	// model coefficients which better reflect pure development effort.
+	effortMonths := 2.0 * math.Pow(ksloc, 1.05)
 
 	// Apply language weighting: adjust effort based on language mix
 	langMultiplier := computeLanguageMultiplier(m)
@@ -83,23 +87,23 @@ func EstimateCost(m *analyzer.Metrics, hourlyRate float64) CostEstimate {
 
 	// Test coverage: graduated thresholds
 	if m.TestRatio < 0.05 {
-		multiplier *= 1.4
-		details = append(details, MultiplierDetail{"Very Low Test Coverage", 1.4, "test ratio < 5%"})
+		multiplier *= 1.15
+		details = append(details, MultiplierDetail{"Very Low Test Coverage", 1.15, "test ratio < 5%"})
 	} else if m.TestRatio < 0.1 {
-		multiplier *= 1.2
-		details = append(details, MultiplierDetail{"Low Test Coverage", 1.2, "test ratio < 10%"})
+		multiplier *= 1.08
+		details = append(details, MultiplierDetail{"Low Test Coverage", 1.08, "test ratio < 10%"})
 	} else if m.TestRatio >= 0.4 {
-		multiplier *= 0.9
-		details = append(details, MultiplierDetail{"Strong Test Coverage", 0.9, "test ratio >= 40%"})
+		multiplier *= 0.92
+		details = append(details, MultiplierDetail{"Strong Test Coverage", 0.92, "test ratio >= 40%"})
 	}
 
 	// Code duplication: graduated
 	if m.DuplicationPct > 30 {
-		multiplier *= 1.35
-		details = append(details, MultiplierDetail{"Very High Duplication", 1.35, "duplication > 30%"})
+		multiplier *= 1.15
+		details = append(details, MultiplierDetail{"Very High Duplication", 1.15, "duplication > 30%"})
 	} else if m.DuplicationPct > 15 {
-		multiplier *= 1.2
-		details = append(details, MultiplierDetail{"High Duplication", 1.2, "duplication > 15%"})
+		multiplier *= 1.08
+		details = append(details, MultiplierDetail{"High Duplication", 1.08, "duplication > 15%"})
 	}
 
 	// Complexity: high average complexity per file increases cost
@@ -108,26 +112,26 @@ func EstimateCost(m *analyzer.Metrics, hourlyRate float64) CostEstimate {
 		avgComplexity = float64(m.TotalComplexity) / float64(m.FileCount)
 	}
 	if avgComplexity > 30 {
-		multiplier *= 1.3
-		details = append(details, MultiplierDetail{"Very High Complexity", 1.3, "avg complexity > 30 per file"})
-	} else if avgComplexity > 15 {
 		multiplier *= 1.15
-		details = append(details, MultiplierDetail{"High Complexity", 1.15, "avg complexity > 15 per file"})
+		details = append(details, MultiplierDetail{"Very High Complexity", 1.15, "avg complexity > 30 per file"})
+	} else if avgComplexity > 15 {
+		multiplier *= 1.08
+		details = append(details, MultiplierDetail{"High Complexity", 1.08, "avg complexity > 15 per file"})
 	}
 
 	// Dependency management
 	if len(m.DepFiles) > 0 && !m.HasLockfile {
-		multiplier *= 1.1
-		details = append(details, MultiplierDetail{"Missing Lockfile", 1.1, "no lockfile found"})
+		multiplier *= 1.05
+		details = append(details, MultiplierDetail{"Missing Lockfile", 1.05, "no lockfile found"})
 	}
 
 	// Heavy dependency count
 	if m.Dependencies > 100 {
-		multiplier *= 1.15
-		details = append(details, MultiplierDetail{"Heavy Dependencies", 1.15, "over 100 dependencies"})
+		multiplier *= 1.08
+		details = append(details, MultiplierDetail{"Heavy Dependencies", 1.08, "over 100 dependencies"})
 	} else if m.Dependencies > 50 {
-		multiplier *= 1.05
-		details = append(details, MultiplierDetail{"Moderate Dependencies", 1.05, "over 50 dependencies"})
+		multiplier *= 1.03
+		details = append(details, MultiplierDetail{"Moderate Dependencies", 1.03, "over 50 dependencies"})
 	}
 
 	// Repository staleness
@@ -140,6 +144,11 @@ func EstimateCost(m *analyzer.Metrics, hourlyRate float64) CostEstimate {
 	if m.GitAvailable && m.ContributorCount >= 5 && m.CommitCount > 200 {
 		multiplier *= 0.95
 		details = append(details, MultiplierDetail{"Mature Project", 0.95, "5+ contributors, 200+ commits"})
+	}
+
+	// Cap the compound multiplier to prevent runaway estimates
+	if multiplier > 1.5 {
+		multiplier = 1.5
 	}
 
 	adjusted := baseCost * multiplier

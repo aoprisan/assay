@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200" viewBox="0 0 640 200" fill="none" role="img" aria-label="assay logo">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F6C453"/>
+      <stop offset="55%" stop-color="#E0A11B"/>
+      <stop offset="100%" stop-color="#B5790E"/>
+    </linearGradient>
+    <linearGradient id="liquid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F6C453"/>
+      <stop offset="100%" stop-color="#C8870F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark: an assay flask cradling a coin stack -->
+  <g transform="translate(40,28)">
+    <!-- flask body -->
+    <path d="M58 8 h28 v44 l40 78 a18 18 0 0 1 -16 26 H34 a18 18 0 0 1 -16 -26 l40 -78 Z"
+          fill="#1F2430" stroke="url(#gold)" stroke-width="5" stroke-linejoin="round"/>
+    <!-- neck rim -->
+    <rect x="52" y="2" width="40" height="12" rx="6" fill="url(#gold)"/>
+    <!-- assayed liquid (the value) -->
+    <path d="M44 112 l28 -54 h0 l28 54 a14 14 0 0 1 -12 20 H56 a14 14 0 0 1 -12 -20 Z"
+          fill="url(#liquid)"/>
+    <!-- coin / value bubble -->
+    <circle cx="72" cy="118" r="13" fill="#1F2430" stroke="#FBE3A1" stroke-width="3"/>
+    <text x="72" y="124" font-family="Georgia, 'Times New Roman', serif" font-size="17"
+          font-weight="700" fill="#FBE3A1" text-anchor="middle">$</text>
+    <!-- measure ticks on neck -->
+    <line x1="86" y1="26" x2="78" y2="26" stroke="url(#gold)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="86" y1="38" x2="80" y2="38" stroke="url(#gold)" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(210,0)">
+    <text x="0" y="118" font-family="'Segoe UI', Helvetica, Arial, sans-serif"
+          font-size="92" font-weight="800" letter-spacing="-3" fill="#E9EDF2">assay</text>
+    <text x="4" y="152" font-family="'Segoe UI', Helvetica, Arial, sans-serif"
+          font-size="22" font-weight="500" letter-spacing="1" fill="#8A93A2">codebase value estimator</text>
+  </g>
+</svg>
